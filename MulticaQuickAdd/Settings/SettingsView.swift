@@ -20,6 +20,8 @@ struct SettingsView: View {
       Toggle("Launch at login", isOn: $launchAtLogin)
     }
     .formStyle(.grouped)
+    .scrollDisabled(true)
+    .scrollIndicators(.hidden)
     .frame(width: 380)
     .fixedSize()
     .onChange(of: hotKey) { _, newValue in
