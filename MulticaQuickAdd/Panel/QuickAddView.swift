@@ -21,16 +21,11 @@ struct QuickAddView: View {
         submitButton
       }
     }
-    .padding(16)
-    .frame(width: 560)
-    .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .fill(.regularMaterial)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-    )
+    .padding(.horizontal, 24)
+    .padding(.vertical, 16)
+    .frame(width: 640)
+    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
   }
 
   private var promptEditor: some View {
@@ -42,8 +37,8 @@ struct QuickAddView: View {
     .overlay(alignment: .topLeading) {
       if model.prompt.isEmpty {
         Text("Describe an issue for Multica")
-          .font(.system(size: 16))
-          .foregroundStyle(.tertiary)
+          .font(.system(size: 22))
+          .foregroundStyle(.secondary)
           .padding(.top, 4)
           .allowsHitTesting(false)
       }
@@ -165,8 +160,8 @@ struct GrowingTextView: NSViewRepresentable {
   var onSubmit: () -> Void
   var onEscape: () -> Void
 
-  static let font = NSFont.systemFont(ofSize: 16)
-  private static let minHeight: CGFloat = 52
+  static let font = NSFont.systemFont(ofSize: 22)
+  private static let minHeight: CGFloat = 40
   private static let maxHeight: CGFloat = 240
 
   func makeCoordinator() -> Coordinator {
@@ -211,7 +206,7 @@ struct GrowingTextView: NSViewRepresentable {
       if let proposed = proposal.width, proposed.isFinite, proposed > 0 {
         proposed
       } else {
-        528
+        592
       }
     return CGSize(width: width, height: Self.measuredHeight(text: text, width: width - 2))
   }

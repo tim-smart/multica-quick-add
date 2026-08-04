@@ -4,7 +4,7 @@ import SwiftUI
 final class QuickAddPanel: NSPanel {
   init(contentView: NSView) {
     super.init(
-      contentRect: NSRect(x: 0, y: 0, width: 560, height: 140),
+      contentRect: NSRect(x: 0, y: 0, width: 640, height: 140),
       styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
       defer: false)
@@ -56,6 +56,7 @@ final class QuickAddPanelController: NSObject, NSWindowDelegate {
     model.panelWillOpen()
     position()
     panel.makeKeyAndOrderFront(nil)
+    panel.invalidateShadow()
   }
 
   func hide() {
@@ -81,6 +82,7 @@ final class QuickAddPanelController: NSObject, NSWindowDelegate {
     // Keep the top edge fixed while the text area grows.
     guard let topEdge, panel.isVisible, panel.frame.maxY != topEdge else { return }
     panel.setFrameTopLeftPoint(NSPoint(x: panel.frame.minX, y: topEdge))
+    panel.invalidateShadow()
   }
 
   func windowDidResignKey(_ notification: Notification) {

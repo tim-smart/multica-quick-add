@@ -3,7 +3,7 @@ name: MulticaQuickAdd
 options:
   createIntermediateGroups: true
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
 
 settings:
   base:
@@ -17,6 +17,10 @@ targets:
       - path: MulticaQuickAdd
     entitlements:
       path: MulticaQuickAdd/MulticaQuickAdd.entitlements
+    info:
+      path: MulticaQuickAdd/Info.plist
+      properties:
+        CFBundleIconFile: AppIcon
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.multica.quickadd
