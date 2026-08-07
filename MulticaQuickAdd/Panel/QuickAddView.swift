@@ -36,7 +36,7 @@ struct QuickAddView: View {
     )
     .overlay(alignment: .topLeading) {
       if model.prompt.isEmpty {
-        Text("Describe an issue for Multica")
+        Text("Describe an issue")
           .font(.system(size: 22))
           .foregroundStyle(.secondary)
           .padding(.top, 4)
