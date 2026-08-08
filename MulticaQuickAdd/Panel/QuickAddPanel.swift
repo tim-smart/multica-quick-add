@@ -42,6 +42,7 @@ final class QuickAddPanelController: NSObject, NSWindowDelegate {
     super.init()
     panel.delegate = self
     model.dismiss = { [weak self] in self?.hide() }
+    model.refocus = { [weak self] in self?.panel.makeKeyAndOrderFront(nil) }
   }
 
   func toggle() {
@@ -86,6 +87,7 @@ final class QuickAddPanelController: NSObject, NSWindowDelegate {
   }
 
   func windowDidResignKey(_ notification: Notification) {
+    guard !model.isFilePickerOpen else { return }
     hide()
   }
 }

@@ -32,6 +32,18 @@ struct CreatedBy: Codable, Identifiable, Hashable, Sendable {
   var name: String
 }
 
+struct PendingAttachment: Identifiable, Hashable, Sendable {
+  let id: UUID
+  var filename: String
+  var data: Data
+
+  init(id: UUID = UUID(), filename: String, data: Data) {
+    self.id = id
+    self.filename = filename
+    self.data = data
+  }
+}
+
 struct WorkspaceCatalog: Codable, Hashable, Sendable {
   var projects: [Project] = []
   var agents: [Agent] = []

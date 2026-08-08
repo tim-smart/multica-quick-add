@@ -29,7 +29,8 @@ enum APIError: LocalizedError, Equatable {
 
 protocol IssueSubmitter: Sendable {
   func submitQuickCreate(
-    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?
+    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?,
+    attachments: [PendingAttachment]
   ) async throws
 }
 
@@ -50,21 +51,20 @@ enum MulticaAPI {
     workspaceID: String,
     prompt: String,
     createdBy: CreatedBy,
-    projectID: String?
+    projectID: String?,
+    attachmentIDs: [String] = []
   ) throws -> URLRequest {
-    guard var components = URLComponents(url: config.serverURL, resolvingAgainstBaseURL: false)
+    guard
+      let url = endpointURL(
+        config: config, path: "/api/issues/quick-create", workspaceID: workspaceID)
     else { throw APIError.badServerURL }
-    let basePath =
-      components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-    components.path = basePath + "/api/issues/quick-create"
-    components.queryItems = [URLQueryItem(name: "workspace_id", value: workspaceID)]
-    guard let url = components.url else { throw APIError.badServerURL }
 
     let payload = QuickCreatePayload(
       prompt: prompt,
       agentID: createdBy.kind == .agent ? createdBy.id : nil,
       squadID: createdBy.kind == .squad ? createdBy.id : nil,
-      projectID: projectID)
+      projectID: projectID,
+      attachmentIDs: attachmentIDs.isEmpty ? nil : attachmentIDs)
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -74,7 +74,48 @@ enum MulticaAPI {
     return request
   }
 
-  static func send(_ request: URLRequest) async throws {
+  static func uploadRequest(
+    config: MulticaConfig,
+    workspaceID: String,
+    attachment: PendingAttachment,
+    boundary: String = "multica-quick-add-\(UUID().uuidString)"
+  ) throws -> URLRequest {
+    guard let url = endpointURL(config: config, path: "/api/upload-file", workspaceID: workspaceID)
+    else { throw APIError.badServerURL }
+
+    let filename = attachment.filename
+      .replacingOccurrences(of: "\"", with: "_")
+      .replacingOccurrences(of: "\n", with: " ")
+      .replacingOccurrences(of: "\r", with: " ")
+    var body = Data()
+    body.append(Data("--\(boundary)\r\n".utf8))
+    body.append(
+      Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
+    body.append(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+    body.append(attachment.data)
+    body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+    request.setValue(
+      "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+    request.httpBody = body
+    return request
+  }
+
+  static func uploadedAttachmentID(from data: Data) throws -> String {
+    struct UploadResponse: Decodable {
+      var id: String
+    }
+    guard let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+      throw APIError.server(status: 0, message: "Upload response is missing the attachment id.")
+    }
+    return response.id
+  }
+
+  @discardableResult
+  static func send(_ request: URLRequest) async throws -> Data {
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse else {
       throw APIError.server(status: 0, message: "Unexpected response from the server.")
@@ -82,6 +123,18 @@ enum MulticaAPI {
     guard (200..<300).contains(http.statusCode) else {
       throw APIError.server(status: http.statusCode, message: errorMessage(from: data))
     }
+    return data
+  }
+
+  private static func endpointURL(config: MulticaConfig, path: String, workspaceID: String) -> URL?
+  {
+    guard var components = URLComponents(url: config.serverURL, resolvingAgainstBaseURL: false)
+    else { return nil }
+    let basePath =
+      components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+    components.path = basePath + path
+    components.queryItems = [URLQueryItem(name: "workspace_id", value: workspaceID)]
+    return components.url
   }
 
   private static func errorMessage(from data: Data) -> String {
@@ -102,27 +155,38 @@ enum MulticaAPI {
     var agentID: String?
     var squadID: String?
     var projectID: String?
+    var attachmentIDs: [String]?
 
     private enum CodingKeys: String, CodingKey {
       case prompt
       case agentID = "agent_id"
       case squadID = "squad_id"
       case projectID = "project_id"
+      case attachmentIDs = "attachment_ids"
     }
   }
 }
 
 struct MulticaAPIClient: IssueSubmitter {
   func submitQuickCreate(
-    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?
+    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?,
+    attachments: [PendingAttachment]
   ) async throws {
     let config = try MulticaAPI.loadConfig()
+    var attachmentIDs: [String] = []
+    for attachment in attachments {
+      let uploadRequest = try MulticaAPI.uploadRequest(
+        config: config, workspaceID: workspaceID, attachment: attachment)
+      let response = try await MulticaAPI.send(uploadRequest)
+      attachmentIDs.append(try MulticaAPI.uploadedAttachmentID(from: response))
+    }
     let request = try MulticaAPI.quickCreateRequest(
       config: config,
       workspaceID: workspaceID,
       prompt: prompt,
       createdBy: createdBy,
-      projectID: projectID)
+      projectID: projectID,
+      attachmentIDs: attachmentIDs)
     try await MulticaAPI.send(request)
   }
 }

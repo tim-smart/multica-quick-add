@@ -45,6 +45,31 @@ Content-Type: application/json
   Multica inbox as `quick_create_failed`, so our notification says "sent to
   <agent>" rather than "issue created".
 
+## Attachment upload API (verified against api.multica.ai)
+
+```
+POST {server_url}/api/upload-file?workspace_id=<uuid>
+Authorization: Bearer <token>
+Content-Type: multipart/form-data; boundary=...
+
+form field "file": filename + bytes
+```
+
+- Returns 200 with JSON including `id`, `filename`, `url`, `content_type`,
+  `size_bytes`. Max upload size is 100 MB. The server sniffs the content
+  type from the bytes and the filename extension, so the part's own
+  Content-Type does not matter.
+- The returned `id` goes into the quick-create payload as
+  `attachment_ids: [<uuid>, ...]` (confirmed in the multica source:
+  `QuickCreateIssueRequest` in `server/internal/handler/issue.go`).
+- The server rejects quick-create with attachments when the agent's daemon
+  is too old; the error message surfaces through our failure notification.
+
+Images can be pasted or dropped into the prompt, dropped anywhere on the
+panel, or picked via the paperclip button. Uploads happen at submit time,
+after the panel dismisses, so attachments are plain filename + data until
+then and a failure restores both prompt and attachments.
+
 ## CLI commands used
 
 ```

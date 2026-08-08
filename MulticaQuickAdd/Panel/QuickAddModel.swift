@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class QuickAddModel {
   var prompt = ""
+  private(set) var attachments: [PendingAttachment] = []
   private(set) var workspaces: [Workspace] = []
   private(set) var catalog: WorkspaceCatalog?
   private(set) var selectedWorkspaceID: String?
@@ -12,7 +13,12 @@ final class QuickAddModel {
   private(set) var selectedCreatedBy: CreatedBy?
   private(set) var loadError: String?
 
+  // True while an NSOpenPanel is up, so the panel controller skips auto-hide
+  // when the quick add panel resigns key.
+  var isFilePickerOpen = false
+
   var dismiss: () -> Void = {}
+  var refocus: () -> Void = {}
 
   private let dataSource: any MulticaDataSource
   private let submitter: any IssueSubmitter
@@ -48,6 +54,14 @@ final class QuickAddModel {
     refresh()
   }
 
+  func addAttachments(_ newAttachments: [PendingAttachment]) {
+    attachments.append(contentsOf: newAttachments)
+  }
+
+  func removeAttachment(id: UUID) {
+    attachments.removeAll { $0.id == id }
+  }
+
   func refresh() {
     refreshTask?.cancel()
     refreshTask = Task { await performRefresh() }
@@ -75,16 +89,20 @@ final class QuickAddModel {
     guard canSubmit, let workspaceID = selectedWorkspaceID, let createdBy = selectedCreatedBy
     else { return }
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    let attachments = attachments
     let projectID = selectedProjectID
     self.prompt = ""
+    self.attachments = []
     dismiss()
     Task {
       do {
         try await submitter.submitQuickCreate(
-          workspaceID: workspaceID, prompt: prompt, createdBy: createdBy, projectID: projectID)
+          workspaceID: workspaceID, prompt: prompt, createdBy: createdBy, projectID: projectID,
+          attachments: attachments)
         Notifier.notify(title: "Sent to \(createdBy.name)", body: prompt)
       } catch {
         self.prompt = prompt
+        self.attachments = attachments
         Notifier.notify(title: "Quick add failed", body: error.localizedDescription)
       }
     }

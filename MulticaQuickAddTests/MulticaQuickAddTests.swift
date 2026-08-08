@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -121,5 +122,150 @@ struct QuickCreateRequestTests {
     #expect(
       request.url?.absoluteString
         == "https://api.multica.ai/api/issues/quick-create?workspace_id=ws-1")
+  }
+
+  @Test func includesAttachmentIDs() throws {
+    let request = try MulticaAPI.quickCreateRequest(
+      config: config,
+      workspaceID: "ws-1",
+      prompt: "Fix the login bug",
+      createdBy: CreatedBy(kind: .agent, id: "a-1", name: "Claude Engineer"),
+      projectID: nil,
+      attachmentIDs: ["att-1", "att-2"])
+
+    struct Body: Decodable {
+      var prompt: String
+      var agentID: String
+      var attachmentIDs: [String]
+
+      enum CodingKeys: String, CodingKey {
+        case prompt
+        case agentID = "agent_id"
+        case attachmentIDs = "attachment_ids"
+      }
+    }
+    let body = try JSONDecoder().decode(Body.self, from: request.httpBody ?? Data())
+    #expect(body.prompt == "Fix the login bug")
+    #expect(body.agentID == "a-1")
+    #expect(body.attachmentIDs == ["att-1", "att-2"])
+  }
+}
+
+struct UploadRequestTests {
+  private let config = MulticaConfig(
+    serverURL: URL(string: "https://api.multica.ai")!, token: "tok_123")
+
+  @Test func buildsMultipartRequest() throws {
+    let attachment = PendingAttachment(filename: "screen.png", data: Data("PNGDATA".utf8))
+    let request = try MulticaAPI.uploadRequest(
+      config: config, workspaceID: "ws-1", attachment: attachment, boundary: "test-boundary")
+
+    #expect(
+      request.url?.absoluteString == "https://api.multica.ai/api/upload-file?workspace_id=ws-1")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok_123")
+    #expect(
+      request.value(forHTTPHeaderField: "Content-Type")
+        == "multipart/form-data; boundary=test-boundary")
+
+    let expectedBody = """
+      --test-boundary\r
+      Content-Disposition: form-data; name="file"; filename="screen.png"\r
+      Content-Type: application/octet-stream\r
+      \r
+      PNGDATA\r
+      --test-boundary--\r
+
+      """
+    #expect(request.httpBody == Data(expectedBody.utf8))
+  }
+
+  @Test func sanitizesFilename() throws {
+    let attachment = PendingAttachment(filename: "a\"b\r\n.png", data: Data())
+    let request = try MulticaAPI.uploadRequest(
+      config: config, workspaceID: "ws-1", attachment: attachment, boundary: "b")
+    let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+    #expect(body.contains("filename=\"a_b  .png\""))
+  }
+
+  @Test func decodesUploadedAttachmentID() throws {
+    let json = """
+      {"id": "att-1", "filename": "screen.png", "url": "https://static.multica.ai/x.png"}
+      """
+    #expect(try MulticaAPI.uploadedAttachmentID(from: Data(json.utf8)) == "att-1")
+  }
+
+  @Test func missingAttachmentIDThrows() {
+    #expect(throws: APIError.self) {
+      try MulticaAPI.uploadedAttachmentID(from: Data("{}".utf8))
+    }
+  }
+}
+
+struct ImagePasteboardTests {
+  private func withPasteboard(_ body: (NSPasteboard) throws -> Void) rethrows {
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
+    pasteboard.clearContents()
+    try body(pasteboard)
+  }
+
+  @Test func attachesBitmapWithNoText() {
+    withPasteboard { pasteboard in
+      pasteboard.setData(Data("PNG".utf8), forType: .png)
+      let images = ImagePasteboard.pastedImages(from: pasteboard)
+      #expect(images.map(\.filename) == [ImagePasteboard.pastedFilename])
+      #expect(images.first?.data == Data("PNG".utf8))
+    }
+  }
+
+  @Test func prefersTextOverBitmap() {
+    withPasteboard { pasteboard in
+      pasteboard.setData(Data("PNG".utf8), forType: .png)
+      pasteboard.setString("cell text", forType: .string)
+      #expect(ImagePasteboard.pastedImages(from: pasteboard).isEmpty)
+    }
+  }
+
+  @Test func attachesBitmapWhenTextIsImageURL() {
+    withPasteboard { pasteboard in
+      pasteboard.setData(Data("PNG".utf8), forType: .png)
+      pasteboard.setString("https://example.com/cat.png", forType: .string)
+      #expect(ImagePasteboard.pastedImages(from: pasteboard).count == 1)
+    }
+  }
+
+  @Test func dragIgnoresText() {
+    withPasteboard { pasteboard in
+      pasteboard.setData(Data("PNG".utf8), forType: .png)
+      pasteboard.setString("cell text", forType: .string)
+      #expect(ImagePasteboard.draggedImages(from: pasteboard).count == 1)
+    }
+  }
+
+  @Test func readsImageFiles() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appending(path: "paste-\(UUID().uuidString).png")
+    try Data("PNGFILE".utf8).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    withPasteboard { pasteboard in
+      pasteboard.writeObjects([url as NSURL])
+      let images = ImagePasteboard.pastedImages(from: pasteboard)
+      #expect(images.map(\.filename) == [url.lastPathComponent])
+      #expect(images.first?.data == Data("PNGFILE".utf8))
+    }
+  }
+
+  @Test func ignoresNonImageFiles() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appending(path: "paste-\(UUID().uuidString).txt")
+    try Data("TEXT".utf8).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    withPasteboard { pasteboard in
+      pasteboard.writeObjects([url as NSURL])
+      #expect(ImagePasteboard.pastedImages(from: pasteboard).isEmpty)
+    }
   }
 }
