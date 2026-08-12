@@ -28,8 +28,8 @@ enum APIError: LocalizedError, Equatable {
 }
 
 protocol IssueSubmitter: Sendable {
-  func submitQuickCreate(
-    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?,
+  func submit(
+    workspaceID: String, prompt: String, assignee: Assignee, projectID: String?,
     attachments: [PendingAttachment]
   ) async throws
 }
@@ -50,7 +50,7 @@ enum MulticaAPI {
     config: MulticaConfig,
     workspaceID: String,
     prompt: String,
-    createdBy: CreatedBy,
+    assignee: Assignee,
     projectID: String?,
     attachmentIDs: [String] = []
   ) throws -> URLRequest {
@@ -61,14 +61,54 @@ enum MulticaAPI {
 
     let payload = QuickCreatePayload(
       prompt: prompt,
-      agentID: createdBy.kind == .agent ? createdBy.id : nil,
-      squadID: createdBy.kind == .squad ? createdBy.id : nil,
+      agentID: assignee.kind == .agent ? assignee.id : nil,
+      squadID: assignee.kind == .squad ? assignee.id : nil,
       projectID: projectID,
       attachmentIDs: attachmentIDs.isEmpty ? nil : attachmentIDs)
 
+    return try jsonRequest(url: url, token: config.token, payload: payload)
+  }
+
+  // Quick-create only accepts agent or squad actors, so issues for a human
+  // go through the plain create endpoint: first prompt line becomes the
+  // title, the rest the description.
+  static func createIssueRequest(
+    config: MulticaConfig,
+    workspaceID: String,
+    prompt: String,
+    memberUserID: String,
+    projectID: String?,
+    attachmentIDs: [String] = []
+  ) throws -> URLRequest {
+    guard let url = endpointURL(config: config, path: "/api/issues", workspaceID: workspaceID)
+    else { throw APIError.badServerURL }
+
+    let (title, description) = titleAndDescription(from: prompt)
+    let payload = CreateIssuePayload(
+      title: title,
+      description: description,
+      assigneeType: "member",
+      assigneeID: memberUserID,
+      projectID: projectID,
+      attachmentIDs: attachmentIDs.isEmpty ? nil : attachmentIDs)
+
+    return try jsonRequest(url: url, token: config.token, payload: payload)
+  }
+
+  static func titleAndDescription(from prompt: String) -> (title: String, description: String?) {
+    guard let newline = prompt.firstIndex(of: "\n") else { return (prompt, nil) }
+    let title = String(prompt[..<newline])
+    let description = String(prompt[prompt.index(after: newline)...])
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return (title, description.isEmpty ? nil : description)
+  }
+
+  private static func jsonRequest(
+    url: URL, token: String, payload: some Encodable
+  ) throws -> URLRequest {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
-    request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONEncoder().encode(payload)
     return request
@@ -165,11 +205,29 @@ enum MulticaAPI {
       case attachmentIDs = "attachment_ids"
     }
   }
+
+  private struct CreateIssuePayload: Encodable {
+    var title: String
+    var description: String?
+    var assigneeType: String
+    var assigneeID: String
+    var projectID: String?
+    var attachmentIDs: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+      case title
+      case description
+      case assigneeType = "assignee_type"
+      case assigneeID = "assignee_id"
+      case projectID = "project_id"
+      case attachmentIDs = "attachment_ids"
+    }
+  }
 }
 
 struct MulticaAPIClient: IssueSubmitter {
-  func submitQuickCreate(
-    workspaceID: String, prompt: String, createdBy: CreatedBy, projectID: String?,
+  func submit(
+    workspaceID: String, prompt: String, assignee: Assignee, projectID: String?,
     attachments: [PendingAttachment]
   ) async throws {
     let config = try MulticaAPI.loadConfig()
@@ -180,13 +238,25 @@ struct MulticaAPIClient: IssueSubmitter {
       let response = try await MulticaAPI.send(uploadRequest)
       attachmentIDs.append(try MulticaAPI.uploadedAttachmentID(from: response))
     }
-    let request = try MulticaAPI.quickCreateRequest(
-      config: config,
-      workspaceID: workspaceID,
-      prompt: prompt,
-      createdBy: createdBy,
-      projectID: projectID,
-      attachmentIDs: attachmentIDs)
+    let request =
+      switch assignee.kind {
+      case .agent, .squad:
+        try MulticaAPI.quickCreateRequest(
+          config: config,
+          workspaceID: workspaceID,
+          prompt: prompt,
+          assignee: assignee,
+          projectID: projectID,
+          attachmentIDs: attachmentIDs)
+      case .member:
+        try MulticaAPI.createIssueRequest(
+          config: config,
+          workspaceID: workspaceID,
+          prompt: prompt,
+          memberUserID: assignee.id,
+          projectID: projectID,
+          attachmentIDs: attachmentIDs)
+      }
     try await MulticaAPI.send(request)
   }
 }

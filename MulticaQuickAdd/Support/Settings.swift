@@ -32,12 +32,13 @@ final class AppSettings {
     defaults.set(id, forKey: "lastProjectID.\(workspaceID)")
   }
 
-  func lastCreatedBy(workspaceID: String) -> CreatedBy? {
-    read(CreatedBy.self, key: "lastCreatedBy.\(workspaceID)")
+  // The defaults key predates the created-by → assignee rename.
+  func lastAssignee(workspaceID: String) -> Assignee? {
+    read(Assignee.self, key: "lastCreatedBy.\(workspaceID)")
   }
 
-  func setLastCreatedBy(_ createdBy: CreatedBy?, workspaceID: String) {
-    write(createdBy, key: "lastCreatedBy.\(workspaceID)")
+  func setLastAssignee(_ assignee: Assignee?, workspaceID: String) {
+    write(assignee, key: "lastCreatedBy.\(workspaceID)")
   }
 
   var cachedWorkspaces: [Workspace]? {

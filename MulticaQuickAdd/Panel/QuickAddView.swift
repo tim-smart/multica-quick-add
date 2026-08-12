@@ -21,7 +21,7 @@ struct QuickAddView: View {
         attachButton
         workspacePicker
         projectPicker
-        createdByPicker
+        assigneePicker
         Spacer()
         submitButton
       }
@@ -153,20 +153,20 @@ struct QuickAddView: View {
   }
 
   @ViewBuilder
-  private var createdByPicker: some View {
+  private var assigneePicker: some View {
     if let catalog = model.catalog {
-      if catalog.createdByOptions.isEmpty {
-        Text("No agents")
+      if catalog.assigneeOptions.isEmpty {
+        Text("No assignees")
           .font(.callout)
           .foregroundStyle(.secondary)
       } else {
         Picker(
-          "Created by",
+          "Assignee",
           selection: Binding(
-            get: { model.selectedCreatedBy },
+            get: { model.selectedAssignee },
             set: { newValue in
               if let newValue {
-                model.selectCreatedBy(newValue)
+                model.selectAssignee(newValue)
               }
             })
         ) {
@@ -174,7 +174,7 @@ struct QuickAddView: View {
             Section("Agents") {
               ForEach(catalog.agents) { agent in
                 Text(agent.name)
-                  .tag(Optional(CreatedBy(kind: .agent, id: agent.id, name: agent.name)))
+                  .tag(Optional(Assignee(kind: .agent, id: agent.id, name: agent.name)))
               }
             }
           }
@@ -182,7 +182,15 @@ struct QuickAddView: View {
             Section("Squads") {
               ForEach(catalog.squads) { squad in
                 Text(squad.name)
-                  .tag(Optional(CreatedBy(kind: .squad, id: squad.id, name: squad.name)))
+                  .tag(Optional(Assignee(kind: .squad, id: squad.id, name: squad.name)))
+              }
+            }
+          }
+          if !catalog.members.isEmpty {
+            Section("People") {
+              ForEach(catalog.members) { member in
+                Text(member.name)
+                  .tag(Optional(Assignee(kind: .member, id: member.id, name: member.name)))
               }
             }
           }

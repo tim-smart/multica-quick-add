@@ -39,13 +39,15 @@ struct MulticaCLI: MulticaDataSource {
     async let projects = list([Project].self, "project", workspaceID: workspaceID)
     async let agents = list([Agent].self, "agent", workspaceID: workspaceID)
     async let squads = list([Squad].self, "squad", workspaceID: workspaceID)
-    return try await WorkspaceCatalog(projects: projects, agents: agents, squads: squads)
+    async let members = list([Member].self, "workspace", "member", workspaceID: workspaceID)
+    return try await WorkspaceCatalog(
+      projects: projects, agents: agents, squads: squads, members: members)
   }
 
   private func list<T: Decodable>(
-    _ type: T.Type, _ resource: String, workspaceID: String? = nil
+    _ type: T.Type, _ command: String..., workspaceID: String? = nil
   ) async throws -> T {
-    var arguments = [resource, "list", "--output", "json"]
+    var arguments = command + ["list", "--output", "json"]
     if let workspaceID {
       arguments += ["--workspace-id", workspaceID]
     }

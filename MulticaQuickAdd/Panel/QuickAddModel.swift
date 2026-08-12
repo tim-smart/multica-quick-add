@@ -10,7 +10,7 @@ final class QuickAddModel {
   private(set) var catalog: WorkspaceCatalog?
   private(set) var selectedWorkspaceID: String?
   private(set) var selectedProjectID: String?
-  private(set) var selectedCreatedBy: CreatedBy?
+  private(set) var selectedAssignee: Assignee?
   private(set) var loadError: String?
 
   // True while an NSOpenPanel is up, so the panel controller skips auto-hide
@@ -47,7 +47,7 @@ final class QuickAddModel {
 
   var canSubmit: Bool {
     !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && selectedWorkspaceID != nil && selectedCreatedBy != nil
+      && selectedWorkspaceID != nil && selectedAssignee != nil
   }
 
   func panelWillOpen() {
@@ -79,14 +79,14 @@ final class QuickAddModel {
     settings.setLastProjectID(id, workspaceID: workspaceID)
   }
 
-  func selectCreatedBy(_ createdBy: CreatedBy) {
-    selectedCreatedBy = createdBy
+  func selectAssignee(_ assignee: Assignee) {
+    selectedAssignee = assignee
     guard let workspaceID = selectedWorkspaceID else { return }
-    settings.setLastCreatedBy(createdBy, workspaceID: workspaceID)
+    settings.setLastAssignee(assignee, workspaceID: workspaceID)
   }
 
   func submit() {
-    guard canSubmit, let workspaceID = selectedWorkspaceID, let createdBy = selectedCreatedBy
+    guard canSubmit, let workspaceID = selectedWorkspaceID, let assignee = selectedAssignee
     else { return }
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let attachments = attachments
@@ -96,10 +96,10 @@ final class QuickAddModel {
     dismiss()
     Task {
       do {
-        try await submitter.submitQuickCreate(
-          workspaceID: workspaceID, prompt: prompt, createdBy: createdBy, projectID: projectID,
+        try await submitter.submit(
+          workspaceID: workspaceID, prompt: prompt, assignee: assignee, projectID: projectID,
           attachments: attachments)
-        Notifier.notify(title: "Sent to \(createdBy.name)", body: prompt)
+        Notifier.notify(title: "Sent to \(assignee.name)", body: prompt)
       } catch {
         self.prompt = prompt
         self.attachments = attachments
@@ -114,12 +114,12 @@ final class QuickAddModel {
     guard let id else {
       catalog = nil
       selectedProjectID = nil
-      selectedCreatedBy = nil
+      selectedAssignee = nil
       return
     }
     catalog = settings.cachedCatalog(workspaceID: id)
     selectedProjectID = settings.lastProjectID(workspaceID: id)
-    selectedCreatedBy = settings.lastCreatedBy(workspaceID: id)
+    selectedAssignee = settings.lastAssignee(workspaceID: id)
     reconcileSelections()
   }
 
@@ -155,12 +155,12 @@ final class QuickAddModel {
     {
       selectedProjectID = nil
     }
-    let options = catalog.createdByOptions
-    if let current = selectedCreatedBy {
-      selectedCreatedBy = options.first { $0.kind == current.kind && $0.id == current.id }
+    let options = catalog.assigneeOptions
+    if let current = selectedAssignee {
+      selectedAssignee = options.first { $0.kind == current.kind && $0.id == current.id }
     }
-    if selectedCreatedBy == nil {
-      selectedCreatedBy = options.first
+    if selectedAssignee == nil {
+      selectedAssignee = options.first
     }
   }
 }

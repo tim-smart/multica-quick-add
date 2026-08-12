@@ -50,6 +50,24 @@ struct CLIDecodingTests {
     let squads = try JSONDecoder().decode([Squad].self, from: Data(json.utf8))
     #expect(squads == [Squad(id: "s-1", name: "Engineering")])
   }
+
+  @Test func decodesMembers() throws {
+    let json = """
+      [{"id": "m-1", "user_id": "u-1", "name": "Tim Smart", "email": "tim@example.com", "role": "owner"}]
+      """
+    let members = try JSONDecoder().decode([Member].self, from: Data(json.utf8))
+    #expect(members == [Member(userID: "u-1", name: "Tim Smart")])
+    #expect(members.first?.id == "u-1")
+  }
+
+  @Test func decodesCatalogCachedWithoutMembers() throws {
+    let json = """
+      {"projects": [], "agents": [{"id": "a-1", "name": "Claude"}], "squads": []}
+      """
+    let catalog = try JSONDecoder().decode(WorkspaceCatalog.self, from: Data(json.utf8))
+    #expect(catalog.agents == [Agent(id: "a-1", name: "Claude")])
+    #expect(catalog.members.isEmpty)
+  }
 }
 
 struct ConfigTests {
@@ -85,7 +103,7 @@ struct QuickCreateRequestTests {
       config: config,
       workspaceID: "ws-1",
       prompt: "Fix the login bug",
-      createdBy: CreatedBy(kind: .agent, id: "a-1", name: "Claude Engineer"),
+      assignee: Assignee(kind: .agent, id: "a-1", name: "Claude Engineer"),
       projectID: nil)
 
     #expect(
@@ -104,7 +122,7 @@ struct QuickCreateRequestTests {
       config: config,
       workspaceID: "ws-1",
       prompt: "Ship the website",
-      createdBy: CreatedBy(kind: .squad, id: "s-1", name: "Engineering"),
+      assignee: Assignee(kind: .squad, id: "s-1", name: "Engineering"),
       projectID: "p-1")
 
     let body = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())
@@ -117,7 +135,7 @@ struct QuickCreateRequestTests {
       config: config,
       workspaceID: "ws-1",
       prompt: "x",
-      createdBy: CreatedBy(kind: .agent, id: "a-1", name: "A"),
+      assignee: Assignee(kind: .agent, id: "a-1", name: "A"),
       projectID: nil)
     #expect(
       request.url?.absoluteString
@@ -129,7 +147,7 @@ struct QuickCreateRequestTests {
       config: config,
       workspaceID: "ws-1",
       prompt: "Fix the login bug",
-      createdBy: CreatedBy(kind: .agent, id: "a-1", name: "Claude Engineer"),
+      assignee: Assignee(kind: .agent, id: "a-1", name: "Claude Engineer"),
       projectID: nil,
       attachmentIDs: ["att-1", "att-2"])
 
@@ -148,6 +166,62 @@ struct QuickCreateRequestTests {
     #expect(body.prompt == "Fix the login bug")
     #expect(body.agentID == "a-1")
     #expect(body.attachmentIDs == ["att-1", "att-2"])
+  }
+}
+
+struct CreateIssueRequestTests {
+  private let config = MulticaConfig(
+    serverURL: URL(string: "https://api.multica.ai")!, token: "tok_123")
+
+  @Test func buildsMemberRequest() throws {
+    let request = try MulticaAPI.createIssueRequest(
+      config: config,
+      workspaceID: "ws-1",
+      prompt: "Fix the login bug\nUsers get a 500 after OAuth.",
+      memberUserID: "u-1",
+      projectID: "p-1",
+      attachmentIDs: ["att-1"])
+
+    #expect(request.url?.absoluteString == "https://api.multica.ai/api/issues?workspace_id=ws-1")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok_123")
+
+    struct Body: Decodable {
+      var title: String
+      var description: String?
+      var assigneeType: String
+      var assigneeID: String
+      var projectID: String?
+      var attachmentIDs: [String]?
+
+      enum CodingKeys: String, CodingKey {
+        case title
+        case description
+        case assigneeType = "assignee_type"
+        case assigneeID = "assignee_id"
+        case projectID = "project_id"
+        case attachmentIDs = "attachment_ids"
+      }
+    }
+    let body = try JSONDecoder().decode(Body.self, from: request.httpBody ?? Data())
+    #expect(body.title == "Fix the login bug")
+    #expect(body.description == "Users get a 500 after OAuth.")
+    #expect(body.assigneeType == "member")
+    #expect(body.assigneeID == "u-1")
+    #expect(body.projectID == "p-1")
+    #expect(body.attachmentIDs == ["att-1"])
+  }
+
+  @Test func singleLinePromptHasNoDescription() {
+    let (title, description) = MulticaAPI.titleAndDescription(from: "Fix the login bug")
+    #expect(title == "Fix the login bug")
+    #expect(description == nil)
+  }
+
+  @Test func blankRemainderMeansNoDescription() {
+    let (title, description) = MulticaAPI.titleAndDescription(from: "Fix the login bug\n\n  ")
+    #expect(title == "Fix the login bug")
+    #expect(description == nil)
   }
 }
 
