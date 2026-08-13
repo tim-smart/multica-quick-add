@@ -144,14 +144,43 @@ enum MulticaAPI {
     return request
   }
 
-  static func uploadedAttachmentID(from data: Data) throws -> String {
-    struct UploadResponse: Decodable {
-      var id: String
+  struct UploadedAttachment: Decodable, Equatable, Sendable {
+    var id: String
+    var filename: String?
+    var markdownURL: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case id
+      case filename
+      case markdownURL = "markdown_url"
     }
-    guard let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+  }
+
+  static func uploadedAttachment(from data: Data) throws -> UploadedAttachment {
+    guard let response = try? JSONDecoder().decode(UploadedAttachment.self, from: data),
+      !response.id.isEmpty
+    else {
       throw APIError.server(status: 0, message: "Upload response is missing the attachment id.")
     }
-    return response.id
+    return response
+  }
+
+  // Multica's own clients bind attachments twice: attachment_ids joins the
+  // files to the issue, and a markdown image reference in the body is what
+  // actually renders them. Mirrors packages/views/editor/use-coordinated-uploads.ts.
+  static func markdownReference(
+    for uploaded: UploadedAttachment, fallbackFilename: String, config: MulticaConfig
+  ) -> String {
+    let filename = uploaded.filename ?? fallbackFilename
+    let link =
+      uploaded.markdownURL
+      ?? config.serverURL.appending(path: "api/attachments/\(uploaded.id)/download").absoluteString
+    return "![\(filename)](\(link))"
+  }
+
+  static func appendingMarkdown(_ markdown: String, to body: String) -> String {
+    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? markdown : trimmed + "\n\n" + markdown
   }
 
   @discardableResult
@@ -231,12 +260,17 @@ struct MulticaAPIClient: IssueSubmitter {
     attachments: [PendingAttachment]
   ) async throws {
     let config = try MulticaAPI.loadConfig()
+    var prompt = prompt
     var attachmentIDs: [String] = []
     for attachment in attachments {
       let uploadRequest = try MulticaAPI.uploadRequest(
         config: config, workspaceID: workspaceID, attachment: attachment)
       let response = try await MulticaAPI.send(uploadRequest)
-      attachmentIDs.append(try MulticaAPI.uploadedAttachmentID(from: response))
+      let uploaded = try MulticaAPI.uploadedAttachment(from: response)
+      attachmentIDs.append(uploaded.id)
+      let reference = MulticaAPI.markdownReference(
+        for: uploaded, fallbackFilename: attachment.filename, config: config)
+      prompt = MulticaAPI.appendingMarkdown(reference, to: prompt)
     }
     let request =
       switch assignee.kind {

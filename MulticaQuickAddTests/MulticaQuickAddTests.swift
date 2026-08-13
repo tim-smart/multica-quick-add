@@ -262,17 +262,44 @@ struct UploadRequestTests {
     #expect(body.contains("filename=\"a_b  .png\""))
   }
 
-  @Test func decodesUploadedAttachmentID() throws {
+  @Test func decodesUploadedAttachment() throws {
     let json = """
-      {"id": "att-1", "filename": "screen.png", "url": "https://static.multica.ai/x.png"}
+      {"id": "att-1", "filename": "screen.png", "url": "https://static.multica.ai/x.png",
+       "markdown_url": "https://api.multica.ai/api/attachments/att-1/download"}
       """
-    #expect(try MulticaAPI.uploadedAttachmentID(from: Data(json.utf8)) == "att-1")
+    let uploaded = try MulticaAPI.uploadedAttachment(from: Data(json.utf8))
+    #expect(uploaded.id == "att-1")
+    #expect(uploaded.filename == "screen.png")
+    #expect(uploaded.markdownURL == "https://api.multica.ai/api/attachments/att-1/download")
   }
 
   @Test func missingAttachmentIDThrows() {
     #expect(throws: APIError.self) {
-      try MulticaAPI.uploadedAttachmentID(from: Data("{}".utf8))
+      try MulticaAPI.uploadedAttachment(from: Data("{}".utf8))
     }
+    #expect(throws: APIError.self) {
+      try MulticaAPI.uploadedAttachment(from: Data(#"{"id": ""}"#.utf8))
+    }
+  }
+
+  @Test func markdownReferenceUsesServerURL() {
+    let uploaded = MulticaAPI.UploadedAttachment(
+      id: "att-1", filename: "screen.png",
+      markdownURL: "https://static.multica.ai/x.png")
+    #expect(
+      MulticaAPI.markdownReference(for: uploaded, fallbackFilename: "f.png", config: config)
+        == "![screen.png](https://static.multica.ai/x.png)")
+
+    let bare = MulticaAPI.UploadedAttachment(id: "att-2", filename: nil, markdownURL: nil)
+    #expect(
+      MulticaAPI.markdownReference(for: bare, fallbackFilename: "f.png", config: config)
+        == "![f.png](https://api.multica.ai/api/attachments/att-2/download)")
+  }
+
+  @Test func appendsMarkdownWithBlankLine() {
+    #expect(
+      MulticaAPI.appendingMarkdown("![a](b)", to: "Fix the bug\n") == "Fix the bug\n\n![a](b)")
+    #expect(MulticaAPI.appendingMarkdown("![a](b)", to: "  ") == "![a](b)")
   }
 }
 
