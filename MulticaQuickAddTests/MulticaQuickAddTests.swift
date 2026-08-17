@@ -37,18 +37,33 @@ struct CLIDecodingTests {
 
   @Test func decodesAgents() throws {
     let json = """
-      [{"id": "a-1", "name": "Claude Engineer", "model": "claude-fable-5", "status": "idle"}]
+      [{"id": "a-1", "name": "Claude Engineer", "model": "claude-fable-5", "status": "idle",
+        "skills": [{"id": "sk-1", "name": "tdd", "description": "Test first", "enabled": true}]}]
+      """
+    let agents = try JSONDecoder().decode([Agent].self, from: Data(json.utf8))
+    #expect(
+      agents == [
+        Agent(
+          id: "a-1", name: "Claude Engineer",
+          skills: [Skill(id: "sk-1", name: "tdd", description: "Test first", enabled: true)])
+      ])
+  }
+
+  @Test func decodesAgentsWithoutSkills() throws {
+    let json = """
+      [{"id": "a-1", "name": "Claude Engineer"}]
       """
     let agents = try JSONDecoder().decode([Agent].self, from: Data(json.utf8))
     #expect(agents == [Agent(id: "a-1", name: "Claude Engineer")])
+    #expect(agents.first?.enabledSkills == [])
   }
 
   @Test func decodesSquads() throws {
     let json = """
-      [{"id": "s-1", "name": "Engineering", "member_count": 8}]
+      [{"id": "s-1", "name": "Engineering", "leader_id": "a-1", "member_count": 8}]
       """
     let squads = try JSONDecoder().decode([Squad].self, from: Data(json.utf8))
-    #expect(squads == [Squad(id: "s-1", name: "Engineering")])
+    #expect(squads == [Squad(id: "s-1", name: "Engineering", leaderID: "a-1")])
   }
 
   @Test func decodesMembers() throws {
@@ -67,6 +82,61 @@ struct CLIDecodingTests {
     let catalog = try JSONDecoder().decode(WorkspaceCatalog.self, from: Data(json.utf8))
     #expect(catalog.agents == [Agent(id: "a-1", name: "Claude")])
     #expect(catalog.members.isEmpty)
+  }
+}
+
+struct SkillTests {
+  private let tdd = Skill(id: "sk-1", name: "tdd", description: "Test first")
+  private let audit = Skill(id: "sk-2", name: "audit-fix", enabled: true)
+  private let disabled = Skill(id: "sk-3", name: "off", enabled: false)
+
+  private var catalog: WorkspaceCatalog {
+    WorkspaceCatalog(
+      agents: [
+        Agent(id: "a-1", name: "Claude", skills: [tdd, disabled]),
+        Agent(id: "a-2", name: "Codex", skills: [audit]),
+      ],
+      squads: [
+        Squad(id: "s-1", name: "Engineering", leaderID: "a-2"),
+        Squad(id: "s-2", name: "Leaderless"),
+      ])
+  }
+
+  @Test func skillsForAgentExcludeDisabled() {
+    let skills = catalog.skills(for: Assignee(kind: .agent, id: "a-1", name: "Claude"))
+    #expect(skills == [tdd])
+  }
+
+  @Test func skillsForSquadComeFromLeader() {
+    #expect(catalog.skills(for: Assignee(kind: .squad, id: "s-1", name: "Engineering")) == [audit])
+    #expect(catalog.skills(for: Assignee(kind: .squad, id: "s-2", name: "Leaderless")) == [])
+  }
+
+  @Test func membersHaveNoSkills() {
+    #expect(catalog.skills(for: Assignee(kind: .member, id: "u-1", name: "Tim")) == [])
+  }
+
+  @Test func expandsLeadingSkillReference() {
+    let expanded = Skill.expandingReference(in: "/tdd fix the login bug", skills: [tdd, audit])
+    #expect(expanded == "[/tdd](slash://skill/sk-1) fix the login bug")
+  }
+
+  @Test func expandsBareSkillReference() {
+    let expanded = Skill.expandingReference(in: "/audit-fix", skills: [tdd, audit])
+    #expect(expanded == "[/audit-fix](slash://skill/sk-2)")
+  }
+
+  @Test func leavesUnknownSlashTokenAlone() {
+    #expect(
+      Skill.expandingReference(in: "/usr/local is broken", skills: [tdd]) == "/usr/local is broken")
+    #expect(Skill.expandingReference(in: "no slash", skills: [tdd]) == "no slash")
+  }
+
+  @Test func escapesMarkdownCharactersInLabel() {
+    let odd = Skill(id: "sk-9", name: #"we[i]r\d(name)"#)
+    #expect(
+      Skill.expandingReference(in: #"/we[i]r\d(name) go"#, skills: [odd])
+        == #"[/we\[i\]r\\d\(name\)](slash://skill/sk-9) go"#)
   }
 }
 

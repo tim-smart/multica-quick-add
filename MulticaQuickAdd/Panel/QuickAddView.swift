@@ -8,6 +8,9 @@ struct QuickAddView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       promptEditor
+      if !model.skillSuggestions.isEmpty {
+        skillSuggestionList
+      }
       if !model.attachments.isEmpty {
         attachmentStrip
       }
@@ -40,7 +43,10 @@ struct QuickAddView: View {
     GrowingTextView(
       text: $model.prompt,
       onSubmit: { model.submit() },
-      onEscape: { model.dismiss() },
+      onEscape: { model.handleEscape() },
+      onMoveUp: { model.moveSkillHighlight(by: -1) },
+      onMoveDown: { model.moveSkillHighlight(by: 1) },
+      onTab: { model.acceptSkillSuggestion() },
       onAttachImages: { model.addAttachments($0) }
     )
     .overlay(alignment: .topLeading) {
@@ -50,6 +56,34 @@ struct QuickAddView: View {
           .foregroundStyle(.secondary)
           .padding(.top, 4)
           .allowsHitTesting(false)
+      }
+    }
+  }
+
+  private var skillSuggestionList: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      ForEach(Array(model.skillSuggestions.enumerated()), id: \.element.id) { index, skill in
+        Button(action: { model.acceptSkillSuggestion(skill) }) {
+          HStack(spacing: 8) {
+            Text("/\(skill.name)")
+              .font(.system(size: 13, weight: .medium, design: .monospaced))
+            if let description = skill.description, !description.isEmpty {
+              Text(description)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+          }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .contentShape(Rectangle())
+          .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .fill(index == model.skillHighlightIndex ? Color.accentColor.opacity(0.2) : .clear)
+          )
+        }
+        .buttonStyle(.plain)
       }
     }
   }
@@ -274,6 +308,9 @@ struct GrowingTextView: NSViewRepresentable {
   @Binding var text: String
   var onSubmit: () -> Void
   var onEscape: () -> Void
+  var onMoveUp: () -> Bool
+  var onMoveDown: () -> Bool
+  var onTab: () -> Bool
   var onAttachImages: ([PendingAttachment]) -> Void
 
   static let font = NSFont.systemFont(ofSize: 22)
@@ -315,6 +352,9 @@ struct GrowingTextView: NSViewRepresentable {
     guard let textView = scrollView.documentView as? NSTextView else { return }
     if textView.string != text {
       textView.string = text
+      // Programmatic replacement (skill accept, restore after a failed
+      // submit) should leave the caret at the end, not mid-text.
+      textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
     }
   }
 
@@ -370,6 +410,15 @@ struct GrowingTextView: NSViewRepresentable {
       {
         parent.onEscape()
         return true
+      }
+      if commandSelector == #selector(NSResponder.moveUp(_:)) {
+        return parent.onMoveUp()
+      }
+      if commandSelector == #selector(NSResponder.moveDown(_:)) {
+        return parent.onMoveDown()
+      }
+      if commandSelector == #selector(NSResponder.insertTab(_:)) {
+        return parent.onTab()
       }
       return false
     }

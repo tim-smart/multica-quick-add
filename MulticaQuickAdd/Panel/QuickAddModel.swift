@@ -4,7 +4,17 @@ import Observation
 @MainActor
 @Observable
 final class QuickAddModel {
-  var prompt = ""
+  var prompt = "" {
+    didSet {
+      guard prompt != oldValue else { return }
+      skillHighlightIndex = 0
+      if skillQuery != dismissedSkillQuery {
+        dismissedSkillQuery = nil
+      }
+    }
+  }
+  var skillHighlightIndex = 0
+  private var dismissedSkillQuery: String?
   private(set) var attachments: [PendingAttachment] = []
   private(set) var workspaces: [Workspace] = []
   private(set) var catalog: WorkspaceCatalog?
@@ -43,6 +53,51 @@ final class QuickAddModel {
 
   var selectedProject: Project? {
     catalog?.projects.first { $0.id == selectedProjectID }
+  }
+
+  // The picker is open while the prompt is a single "/partial" token; typing
+  // whitespace or accepting a suggestion closes it.
+  private var skillQuery: String? {
+    guard prompt.hasPrefix("/"), !prompt.contains(where: \.isWhitespace) else { return nil }
+    return String(prompt.dropFirst())
+  }
+
+  private var availableSkills: [Skill] {
+    guard let catalog, let assignee = selectedAssignee else { return [] }
+    return catalog.skills(for: assignee)
+  }
+
+  var skillSuggestions: [Skill] {
+    guard let query = skillQuery, query != dismissedSkillQuery else { return [] }
+    let skills = availableSkills
+    let matches =
+      query.isEmpty ? skills : skills.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    return Array(matches.prefix(8))
+  }
+
+  @discardableResult
+  func moveSkillHighlight(by delta: Int) -> Bool {
+    let count = skillSuggestions.count
+    guard count > 0 else { return false }
+    skillHighlightIndex = (skillHighlightIndex + delta + count) % count
+    return true
+  }
+
+  @discardableResult
+  func acceptSkillSuggestion(_ skill: Skill? = nil) -> Bool {
+    let suggestions = skillSuggestions
+    guard !suggestions.isEmpty else { return false }
+    let chosen = skill ?? suggestions[min(skillHighlightIndex, suggestions.count - 1)]
+    prompt = "/\(chosen.name) "
+    return true
+  }
+
+  func handleEscape() {
+    if skillSuggestions.isEmpty {
+      dismiss()
+    } else {
+      dismissedSkillQuery = skillQuery
+    }
   }
 
   var canSubmit: Bool {
@@ -86,9 +141,12 @@ final class QuickAddModel {
   }
 
   func submit() {
+    if acceptSkillSuggestion() { return }
     guard canSubmit, let workspaceID = selectedWorkspaceID, let assignee = selectedAssignee
     else { return }
-    let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    let prompt = Skill.expandingReference(
+      in: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+      skills: availableSkills)
     let attachments = attachments
     let projectID = selectedProjectID
     self.prompt = ""
